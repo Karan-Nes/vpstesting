@@ -1,0 +1,117 @@
+
+function extractAndPushData() {
+  var sheetId = '1-TLFWJR_ugiv3s9F_KI7KGK1QkINBHrrxRWs8qPR-UY';
+  var sheetName = 'Sheet1';
+  var searchQuery = 'subject:"Buyer Details" newer_than:1m'; // Change to 'newer_than:1m' to fetch emails from the last 1 minute
+  
+  var threads = GmailApp.search(searchQuery);
+  var sheet = SpreadsheetApp.openById(sheetId).getSheetByName(sheetName);
+  var data = sheet.getDataRange().getValues();
+  
+  // Extract the processed message IDs from the sheet
+  var processedMessageIds = data.map(row => row[4]); // Assuming message ID is stored in the 5th column
+
+  Logger.log('Number of threads found: ' + threads.length);
+
+  threads.forEach(function(thread) {
+    var messages = thread.getMessages();
+    Logger.log('Number of messages in thread: ' + messages.length);
+
+    // Process only the latest message in the thread
+    var latestMessage = messages[messages.length - 1];
+    var messageId = latestMessage.getId();
+    if (processedMessageIds.includes(messageId)) {
+      Logger.log('Message already processed: ' + messageId);
+      // callPostApiWithHeaders(extractedData.name,extractedData.address,extractedData.phone,extractedData.email);
+      return; // Skip this message as it has already been processed
+    }
+
+    var body = latestMessage.getBody();
+    Logger.log('Email body: ' + body.substring(0, 1000)); // Truncate to avoid large log size
+
+    var extractedData = extractDataFromBody(body);
+    Logger.log('Extracted data: ' + JSON.stringify(extractedData));
+     if (extractedData) {
+       sheet.appendRow([extractedData.name, extractedData.address, extractedData.phone, extractedData.email, messageId]);
+     }
+    callPostApiWithHeaders(extractedData.name,extractedData.address,extractedData.phone,extractedData.email);
+  });
+}
+
+function extractDataFromBody(body) {
+  var nameMatch = body.match(/<div[^>]*>([\w\s]+)<br>/i);
+  var addressMatch = body.match(/<div[^>]*>\s*[\w\s]+<br>([^<]+)<br>/i);
+  var phoneMatch = body.match(/Click to call:\s*<a[^>]*>\+?([\d-]+)<\/a><br>/i);
+  var emailMatch = body.match(/E-mail:\s*<a[^>]*href="mailto:([^"]+)"/i);
+
+  Logger.log('nameMatch: ' + (nameMatch ? nameMatch[1] : 'null'));
+  Logger.log('addressMatch: ' + (addressMatch ? addressMatch[1] : 'null'));
+  Logger.log('phoneMatch: ' + (phoneMatch ? phoneMatch[1] : 'null'));
+  Logger.log('emailMatch: ' + (emailMatch ? emailMatch[1] : 'null'));
+
+  return {
+    name: (nameMatch ? nameMatch[1].trim() : ''),
+    address: (addressMatch ? addressMatch[1].trim() : ''),
+    phone: (phoneMatch ? phoneMatch[1].trim() : ''),
+    email: (emailMatch ? emailMatch[1].trim() : '')
+  };
+}
+
+// Set up a time-driven trigger to run the function every minute
+function createTimeDrivenTriggers() {
+  // Delete all existing time-based triggers to avoid duplicates
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    ScriptApp.deleteTrigger(triggers[i]);
+  }
+  
+  // Create a new time-driven trigger
+  ScriptApp.newTrigger('extractAndPushData')
+           .timeBased()
+           .everyMinutes(1)
+           .create();
+}
+
+
+function serializeFormObject(data) {
+    var formBody = [];
+    for (var property in data) {
+      var encodedKey = encodeURIComponent(property);
+      var encodedValue = encodeURIComponent(data[property]);
+      formBody.push(encodedKey + '=' + encodedValue);
+    }
+    return formBody.join('&');
+  }
+function callPostApiWithHeaders(nameMatch,addressMatch,phoneMatch,emailMatch) {
+  var url = "https://forms.zohopublic.in/app2nessco/form/IndiaMartTest/formperma/omKjvxF-ldEcsHZNjdDIwIKpxxSuHlT49-7I2fB2iXI/htmlRecords/submit"; // Replace with your API URL
+
+  var data = {
+    SingleLine: "sample",
+    SingleLine1: nameMatch,
+    PhoneNumber_countrycode:phoneMatch,
+    MultiLine:addressMatch,
+    Email:emailMatch
+  };
+  var newdata=serializeFormObject(data)
+  var options = {
+    method: "POST",
+    
+    payload: newdata,
+    muteHttpExceptions: true,
+  };
+
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    var responseCode = response.getResponseCode();
+    var responseBody = response.getContentText();
+
+    Logger.log("Response Code: " + responseCode);
+    Logger.log("Response Body: " + responseBody);
+
+    // Parse the response if it's in JSON format
+    var json = JSON.parse(responseBody);
+    Logger.log("Parsed JSON: " + JSON.stringify(json, null, 2));
+  } catch (e) {
+    Logger.log("Error: " + e.message);
+  }
+}
